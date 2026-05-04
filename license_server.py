@@ -1,58 +1,40 @@
 
 from flask import Flask, request, jsonify
-import sqlite3, datetime
-import license_core
+import datetime, hashlib, hmac, base64, json
 
-DB = "license_server.db"
 app = Flask(__name__)
+SECRET = "DENTAFLIX_PRIVATE_SECRET_CHANGE_ME_2026"
+APP_BRAND = "Dentaflix"
+LICENSE_DAYS = 730
 
-def init():
-    con = sqlite3.connect(DB)
-    cur = con.cursor()
-    cur.execute("""CREATE TABLE IF NOT EXISTS activations(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        device_id TEXT,
-        customer_name TEXT,
-        license_type TEXT,
-        expiry TEXT,
-        created_at TEXT
-    )""")
-    con.commit()
-    con.close()
+def sign_payload(payload):
+    clean = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    sig = hmac.new(SECRET.encode(), clean.encode(), hashlib.sha256).hexdigest()
+    return base64.urlsafe_b64encode(json.dumps({"payload": payload, "sig": sig}).encode()).decode()
+
+@app.route("/", methods=["GET"])
+def home():
+    return "Dentaflix License Server is running. Plan: 14000 EGP / 2 years."
 
 @app.route("/activate", methods=["POST"])
 def activate():
     data = request.get_json(force=True)
     device_id = data.get("device_id", "").strip()
     customer_name = data.get("customer_name", "Customer").strip()
+
     if not device_id:
         return jsonify({"ok": False, "message": "Missing device_id"}), 400
 
-    # Default: one-year license from activation date.
-    expiry = (datetime.date.today() + datetime.timedelta(days=365)).isoformat()
+    expiry = (datetime.date.today() + datetime.timedelta(days=LICENSE_DAYS)).isoformat()
     payload = {
         "device_id": device_id,
         "customer_name": customer_name,
-        "license_type": "ONLINE-1YEAR",
+        "license_type": "ONLINE-2YEARS",
         "expiry": expiry,
-        "brand": license_core.APP_BRAND,
+        "brand": APP_BRAND,
+        "price": "14000 EGP"
     }
-    token = license_core.sign_payload(payload)
-
-    con = sqlite3.connect(DB)
-    cur = con.cursor()
-    cur.execute("INSERT INTO activations(device_id,customer_name,license_type,expiry,created_at) VALUES(?,?,?,?,?)",
-                (device_id, customer_name, "ONLINE-1YEAR", expiry, datetime.datetime.now().isoformat()))
-    con.commit()
-    con.close()
-
-    return jsonify({"ok": True, "license_token": token, "expiry": expiry})
-
-@app.route("/", methods=["GET"])
-def home():
-    return "Dentaflix License Server is running."
+    return jsonify({"ok": True, "license_token": sign_payload(payload), "expiry": expiry, "plan": "2 Years", "price": "14000 EGP"})
 
 if __name__ == "__main__":
-    init()
-    print("Dentaflix License Server running on http://127.0.0.1:5000")
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=10000)
